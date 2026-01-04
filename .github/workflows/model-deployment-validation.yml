@@ -1,0 +1,133 @@
+name: Model Deployment Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'public/models/**'
+      - 'scripts/ml_training/**'
+  push:
+    branches:
+      - model-deployment-branch
+
+jobs:
+  validate-models:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: 📦 Install Validation Dependencies
+        run: |
+          pip install jsonschema numpy
+      
+      - name: 📊 Validate Model Manifest
+        run: |
+          python3 << 'EOF'
+          import json
+          import os
+          import sys
+          
+          # Check manifest exists
+          manifest_path = 'public/models/manifest.json'
+          if not os.path.exists(manifest_path):
+              print("❌ manifest.json not found!")
+              sys.exit(1)
+          
+          with open(manifest_path) as f:
+              manifest = json.load(f)
+          
+          print("📋 Manifest Validation:")
+          print(f"   Version: {manifest.get('version', 'N/A')}")
+          print(f"   Timestamp: {manifest.get('timestamp', 'N/A')}")
+          
+          # Validate required models
+          required_models = ['lightgbm', 'xgboost', 'catboost', 'randomforest']
+          models = manifest.get('models', {})
+          
+          missing = []
+          for model in required_models:
+              if model not in models:
+                  missing.append(model)
+                  print(f"   ❌ {model}: MISSING")
+              else:
+                  metrics = models[model].get('metrics', {})
+                  accuracy = metrics.get('accuracy', 0)
+                  sharpe = metrics.get('sharpe_ratio', 0)
+                  print(f"   ✅ {model}: accuracy={accuracy:.4f}, sharpe={sharpe:.4f}")
+          
+          if missing:
+              print(f"\n❌ Missing models: {missing}")
+              sys.exit(1)
+          
+          # Validate ensemble exists
+          if 'ensemble' not in models:
+              print("⚠️ Ensemble metrics missing (optional)")
+          else:
+              ens = models['ensemble'].get('metrics', {})
+              print(f"   ✅ ensemble: accuracy={ens.get('accuracy', 0):.4f}, sharpe={ens.get('sharpe_ratio', 0):.4f}")
+          
+          print("\n✅ Manifest validation passed!")
+          EOF
+      
+      - name: 📁 Validate Model Files
+        run: |
+          echo "📂 Checking model files..."
+          
+          for model in lightgbm xgboost catboost randomforest; do
+            dir="public/models/$model"
+            if [ -d "$dir" ]; then
+              if [ -f "$dir/model.json" ]; then
+                echo "✅ $model/model.json exists"
+              else
+                echo "❌ $model/model.json missing"
+                exit 1
+              fi
+              
+              if [ -f "$dir/model.weights.bin" ]; then
+                size=$(stat -f%z "$dir/model.weights.bin" 2>/dev/null || stat -c%s "$dir/model.weights.bin" 2>/dev/null)
+                echo "   - weights.bin: $size bytes"
+              else
+                echo "⚠️ $model/model.weights.bin missing (may be placeholder)"
+              fi
+            else
+              echo "❌ $model directory missing"
+              exit 1
+            fi
+          done
+          
+          echo "✅ All model files validated!"
+      
+      - name: 🔧 Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: 📦 Install Node Dependencies
+        run: npm ci
+      
+      - name: 🧪 Run TypeScript Type Check
+        run: npx tsc --noEmit
+      
+      - name: 🏗️ Test Build
+        run: npm run build
+      
+      - name: ✅ Validation Complete
+        run: |
+          echo "# ✅ Model Deployment Validation Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All models validated successfully:" >> $GITHUB_STEP_SUMMARY
+          echo "- LightGBM ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- XGBoost ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- CatBoost ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Random Forest ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Ready for merge to main!" >> $GITHUB_STEP_SUMMARY

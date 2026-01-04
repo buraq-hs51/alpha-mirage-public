@@ -1,0 +1,67 @@
+# =============================================================================
+# CI/CD: Auto-deploy to Public Repository
+# =============================================================================
+# Triggers on push to main branch, builds the React app, and deploys
+# the built files to the public repository (alpha-mirage-public)
+# =============================================================================
+
+name: Deploy to Public Repo
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. Checkout private repo
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. Build the project
+      - name: Build
+        run: npm run build
+
+      # 5. Copy models to dist
+      - name: Copy models to dist
+        run: |
+          if [ -d "public/models" ]; then
+            cp -r public/models dist/
+            echo "✅ Models copied to dist"
+            ls -la dist/models/
+          else
+            echo "⚠️ No models directory found"
+          fi
+
+      # 6. Add .nojekyll file (prevents GitHub Pages from processing with Jekyll)
+      - name: Add .nojekyll
+        run: touch dist/.nojekyll
+
+      # 7. Deploy to public repository
+      - name: Deploy to public repo
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          # Use a Personal Access Token to push to another repo
+          personal_token: ${{ secrets.DEPLOY_TOKEN }}
+          external_repository: buraq-hs51/alpha-mirage
+          publish_branch: main
+          publish_dir: ./dist
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'Update portfolio'
+

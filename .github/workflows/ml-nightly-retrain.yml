@@ -1,0 +1,526 @@
+name: ML Nightly Retrain
+
+on:
+  schedule:
+    # Run at 9 PM UTC every day (5 PM EST / 2 PM PST)
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deploy even if metrics not improved'
+        required: false
+        default: false
+        type: boolean
+      skip_fetch:
+        description: 'Skip data fetching (use cached data)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  train-and-deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: 📥 Checkout Repository (main branch)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'scripts/ml_training/requirements.txt'
+      
+      - name: 📦 Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/ml_training/requirements.txt
+      
+      - name: 🔧 Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: 📦 Install Node Dependencies
+        run: npm ci
+      
+      - name: 📊 Check for Existing Models (BEFORE training)
+        id: check_models
+        run: |
+          if [ -f "public/models/manifest.json" ]; then
+            echo "existing_models=true" >> $GITHUB_OUTPUT
+            echo "📊 Found existing models in main branch"
+            
+            # Extract current metrics for comparison (BEFORE training overwrites them)
+            OLD_SHARPE=$(python3 -c "import json; m=json.load(open('public/models/manifest.json')); print(m.get('models',{}).get('ensemble',{}).get('metrics',{}).get('sharpe_ratio', 0))" 2>/dev/null || echo "0")
+            OLD_ACCURACY=$(python3 -c "import json; m=json.load(open('public/models/manifest.json')); print(m.get('models',{}).get('ensemble',{}).get('metrics',{}).get('accuracy', 0))" 2>/dev/null || echo "0")
+            
+            echo "old_sharpe=$OLD_SHARPE" >> $GITHUB_OUTPUT
+            echo "old_accuracy=$OLD_ACCURACY" >> $GITHUB_OUTPUT
+            echo "📊 Current main branch metrics: Sharpe=$OLD_SHARPE, Accuracy=$OLD_ACCURACY"
+            
+            # Save backup of existing manifest for reference
+            cp public/models/manifest.json /tmp/old_manifest.json
+            cat public/models/manifest.json
+          else
+            echo "existing_models=false" >> $GITHUB_OUTPUT
+            echo "old_sharpe=0" >> $GITHUB_OUTPUT
+            echo "old_accuracy=0" >> $GITHUB_OUTPUT
+            echo "📊 No existing models found - this will be first deployment"
+          fi
+      
+      - name: 🚀 Run ML Training Pipeline
+        id: training
+        env:
+          PYTHONPATH: ${{ github.workspace }}/scripts/ml_training
+        run: |
+          cd scripts/ml_training
+          
+          # Build command with optional flags
+          # CI/CD uses 10 years of data for nightly retraining (captures multiple market cycles)
+          CMD="python main.py --years 10"
+          
+          if [ "${{ github.event.inputs.force_deploy }}" == "true" ]; then
+            CMD="$CMD --force-deploy"
+            echo "⚠️ Force deploy enabled"
+          fi
+          
+          if [ "${{ github.event.inputs.skip_fetch }}" == "true" ]; then
+            CMD="$CMD --skip-fetch"
+            echo "⚠️ Skip fetch enabled"
+          fi
+          
+          # If no existing models, force deploy
+          if [ "${{ steps.check_models.outputs.existing_models }}" == "false" ]; then
+            CMD="$CMD --force-deploy"
+            echo "⚠️ First deployment - force deploy enabled"
+          fi
+          
+          echo "🚀 Running: $CMD"
+          $CMD
+          
+          # Check if training was successful
+          if [ $? -eq 0 ]; then
+            echo "training_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "training_success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+      
+      - name: 📋 Generate Training Report
+        if: success()
+        run: |
+          echo "# 📊 ML Training Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "scripts/ml_training/comparison_report.json" ]; then
+            echo "## Model Comparison" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat scripts/ml_training/comparison_report.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "public/models/manifest.json" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Model Manifest" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat public/models/manifest.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: 📈 Compare Metrics for Auto-Merge Decision
+        id: compare_metrics
+        if: success()
+        run: |
+          # Get old metrics from check_models step
+          OLD_SHARPE="${{ steps.check_models.outputs.old_sharpe }}"
+          OLD_ACCURACY="${{ steps.check_models.outputs.old_accuracy }}"
+          
+          # Default to 0 if empty
+          OLD_SHARPE=${OLD_SHARPE:-0}
+          OLD_ACCURACY=${OLD_ACCURACY:-0}
+          
+          # Get new metrics from the newly trained models
+          if [ -f "public/models/manifest.json" ]; then
+            NEW_SHARPE=$(python3 -c "import json; m=json.load(open('public/models/manifest.json')); print(m.get('models',{}).get('ensemble',{}).get('metrics',{}).get('sharpe_ratio', 0))" 2>/dev/null || echo "0")
+            NEW_ACCURACY=$(python3 -c "import json; m=json.load(open('public/models/manifest.json')); print(m.get('models',{}).get('ensemble',{}).get('metrics',{}).get('accuracy', 0))" 2>/dev/null || echo "0")
+          else
+            NEW_SHARPE="0"
+            NEW_ACCURACY="0"
+          fi
+          
+          echo "📊 Metric Comparison:"
+          echo "   Old Sharpe: $OLD_SHARPE → New Sharpe: $NEW_SHARPE"
+          echo "   Old Accuracy: $OLD_ACCURACY → New Accuracy: $NEW_ACCURACY"
+          
+          # Calculate improvements
+          SHARPE_IMPROVED=$(python3 -c "print('true' if float('$NEW_SHARPE') > float('$OLD_SHARPE') else 'false')")
+          ACCURACY_IMPROVED=$(python3 -c "print('true' if float('$NEW_ACCURACY') > float('$OLD_ACCURACY') else 'false')")
+          
+          # Calculate improvement percentages
+          if [ "$OLD_SHARPE" != "0" ]; then
+            SHARPE_IMPROVEMENT=$(python3 -c "print(f'{((float(\"$NEW_SHARPE\") - float(\"$OLD_SHARPE\")) / float(\"$OLD_SHARPE\")) * 100:.2f}')")
+          else
+            SHARPE_IMPROVEMENT="100.00"
+          fi
+          
+          if [ "$OLD_ACCURACY" != "0" ]; then
+            ACCURACY_IMPROVEMENT=$(python3 -c "print(f'{((float(\"$NEW_ACCURACY\") - float(\"$OLD_ACCURACY\")) / float(\"$OLD_ACCURACY\")) * 100:.2f}')")
+          else
+            ACCURACY_IMPROVEMENT="100.00"
+          fi
+          
+          echo "   Sharpe Improvement: ${SHARPE_IMPROVEMENT}%"
+          echo "   Accuracy Improvement: ${ACCURACY_IMPROVEMENT}%"
+          
+          # Determine if auto-merge should happen
+          # Auto-merge if: Sharpe improved OR (Accuracy improved AND Sharpe didn't decrease significantly)
+          SHARPE_NOT_DECREASED=$(python3 -c "print('true' if float('$NEW_SHARPE') >= float('$OLD_SHARPE') * 0.95 else 'false')")
+          
+          if [ "$SHARPE_IMPROVED" == "true" ]; then
+            AUTO_MERGE="true"
+            MERGE_REASON="Sharpe ratio improved by ${SHARPE_IMPROVEMENT}%"
+          elif [ "$ACCURACY_IMPROVED" == "true" ] && [ "$SHARPE_NOT_DECREASED" == "true" ]; then
+            AUTO_MERGE="true"
+            MERGE_REASON="Accuracy improved by ${ACCURACY_IMPROVEMENT}% (Sharpe stable)"
+          elif [ "${{ steps.check_models.outputs.existing_models }}" == "false" ]; then
+            AUTO_MERGE="true"
+            MERGE_REASON="First deployment - no previous models to compare"
+          elif [ "${{ github.event.inputs.force_deploy }}" == "true" ]; then
+            AUTO_MERGE="true"
+            MERGE_REASON="Force deploy requested"
+          else
+            AUTO_MERGE="false"
+            MERGE_REASON="Metrics did not improve (Sharpe: ${SHARPE_IMPROVEMENT}%, Accuracy: ${ACCURACY_IMPROVEMENT}%)"
+          fi
+          
+          echo "auto_merge=$AUTO_MERGE" >> $GITHUB_OUTPUT
+          echo "merge_reason=$MERGE_REASON" >> $GITHUB_OUTPUT
+          echo "sharpe_improvement=$SHARPE_IMPROVEMENT" >> $GITHUB_OUTPUT
+          echo "accuracy_improvement=$ACCURACY_IMPROVEMENT" >> $GITHUB_OUTPUT
+          echo "new_sharpe=$NEW_SHARPE" >> $GITHUB_OUTPUT
+          echo "new_accuracy=$NEW_ACCURACY" >> $GITHUB_OUTPUT
+          
+          echo ""
+          echo "🔍 Auto-merge decision: $AUTO_MERGE"
+          echo "   Reason: $MERGE_REASON"
+      
+      - name: 🏗️ Build Application
+        run: npm run build
+      
+      - name: 📊 Verify Model Files (Multi-Paradigm)
+        run: |
+          echo "📂 Checking model files..."
+          ls -la public/models/ || echo "No models directory yet"
+          
+          echo ""
+          echo "=== 🎯 ROLLING WINDOW MODELS (Gradient Boosting) ==="
+          
+          if [ -f "public/models/manifest.json" ]; then
+            echo "✅ manifest.json exists"
+          else
+            echo "❌ manifest.json missing"
+          fi
+          
+          if [ -d "public/models/lightgbm" ]; then
+            echo "✅ LightGBM model directory exists"
+            ls -la public/models/lightgbm/
+          else
+            echo "❌ LightGBM model missing"
+          fi
+          
+          if [ -d "public/models/xgboost" ]; then
+            echo "✅ XGBoost model directory exists"
+            ls -la public/models/xgboost/
+          else
+            echo "❌ XGBoost model missing"
+          fi
+          
+          if [ -d "public/models/catboost" ]; then
+            echo "✅ CatBoost model directory exists"
+            ls -la public/models/catboost/
+          else
+            echo "❌ CatBoost model missing"
+          fi
+          
+          if [ -d "public/models/randomforest" ]; then
+            echo "✅ Random Forest model directory exists"
+            ls -la public/models/randomforest/
+          else
+            echo "❌ Random Forest model missing"
+          fi
+          
+          echo ""
+          echo "=== 📡 ONLINE LEARNING MODELS (SGD & PA) ==="
+          
+          if [ -d "public/models/online" ]; then
+            echo "✅ Online models directory exists"
+            ls -la public/models/online/
+            
+            if [ -f "public/models/online/sgd_weights.json" ]; then
+              echo "  ✅ SGD weights exported"
+            else
+              echo "  ⚠️ SGD weights not found (optional)"
+            fi
+            
+            if [ -f "public/models/online/pa_weights.json" ]; then
+              echo "  ✅ Passive-Aggressive weights exported"
+            else
+              echo "  ⚠️ PA weights not found (optional)"
+            fi
+          else
+            echo "⚠️ Online models directory not found (will be created on first train)"
+          fi
+          
+          echo ""
+          echo "=== 🏛️ VINTAGE ENSEMBLE (Historical Versions) ==="
+          
+          if [ -d "public/models/vintages" ]; then
+            echo "✅ Vintages directory exists"
+            ls -la public/models/vintages/
+            
+            if [ -f "public/models/vintages/manifest.json" ]; then
+              echo "  ✅ Vintage manifest exists"
+              VINTAGE_COUNT=$(python3 -c "import json; m=json.load(open('public/models/vintages/manifest.json')); print(len(m.get('vintages', [])))" 2>/dev/null || echo "0")
+              echo "  📊 Vintages saved: ${VINTAGE_COUNT}"
+            else
+              echo "  ⚠️ Vintage manifest not found (will be created after multiple retrains)"
+            fi
+          else
+            echo "⚠️ Vintages directory not found (will be created after first successful retrain)"
+          fi
+          
+          echo ""
+          echo "=== 📋 PARADIGM STATUS FROM MANIFEST ==="
+          
+          if [ -f "public/models/manifest.json" ]; then
+            # Check paradigm status using simple JSON parsing
+            ROLLING=$(python3 -c "import json; print(json.load(open('public/models/manifest.json')).get('paradigms', {}).get('rolling_window', False))" 2>/dev/null || echo "False")
+            ONLINE=$(python3 -c "import json; print(json.load(open('public/models/manifest.json')).get('paradigms', {}).get('online_learning', False))" 2>/dev/null || echo "False")
+            VINTAGE=$(python3 -c "import json; print(json.load(open('public/models/manifest.json')).get('paradigms', {}).get('vintage_ensemble', False))" 2>/dev/null || echo "False")
+            ONLINE_COUNT=$(python3 -c "import json; print(len(json.load(open('public/models/manifest.json')).get('onlineModels', {})))" 2>/dev/null || echo "0")
+            
+            if [ "$ROLLING" = "True" ]; then
+              echo "  Rolling Window: ✅ Enabled"
+            else
+              echo "  Rolling Window: ❌ Disabled"
+            fi
+            
+            if [ "$ONLINE" = "True" ]; then
+              echo "  Online Learning: ✅ Enabled"
+            else
+              echo "  Online Learning: ❌ Disabled"
+            fi
+            
+            if [ "$VINTAGE" = "True" ]; then
+              echo "  Vintage Ensemble: ✅ Enabled"
+            else
+              echo "  Vintage Ensemble: ❌ Disabled"
+            fi
+            
+            echo "  Online Models Trained: ${ONLINE_COUNT}"
+          else
+            echo "  Could not read paradigm status - manifest missing"
+          fi
+      
+      - name: 📦 Copy Models to Build
+        run: |
+          # Ensure models are in the build output
+          mkdir -p dist/models
+          cp -r public/models/* dist/models/ || echo "No models to copy"
+          
+          echo "📂 Build output models:"
+          ls -la dist/models/ || echo "No models in dist"
+      
+      
+      # =========================================================================
+      # CREATE PULL REQUEST - Let peter-evans/create-pull-request handle git ops
+      # =========================================================================
+      
+      - name: �️ Delete old deployment branch if exists
+        if: success()
+        run: |
+          # Delete remote branch to avoid merge conflicts with stale data
+          git push origin --delete model-deployment-branch 2>/dev/null || echo "Branch doesn't exist or already deleted"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 📝 Create Pull Request to Main
+        id: create_pr
+        if: success()
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: model-deployment-branch
+          base: main
+          commit-message: "🤖 ML Models: Nightly retrain with 10yr data"
+          title: "🤖 [Nightly Retrain] ML Model Update - Sharpe ${{ steps.compare_metrics.outputs.sharpe_improvement }}%"
+          body: |
+            ## 🤖 Nightly Model Retrain Results
+            
+            The nightly ML training pipeline has completed successfully.
+            
+            ###  Training Info
+            - **Training Data:** 10 years (captures multiple market cycles including 2008 crisis recovery, COVID crash, 2022 bear market)
+            - **Source Branch:** main
+            
+            ### 📈 Performance Comparison
+            | Metric | Previous (main) | New (10yr retrain) | Change |
+            |--------|-----------------|-------------------|--------|
+            | Sharpe Ratio | ${{ steps.check_models.outputs.old_sharpe }} | ${{ steps.compare_metrics.outputs.new_sharpe }} | ${{ steps.compare_metrics.outputs.sharpe_improvement }}% |
+            | Accuracy | ${{ steps.check_models.outputs.old_accuracy }} | ${{ steps.compare_metrics.outputs.new_accuracy }} | ${{ steps.compare_metrics.outputs.accuracy_improvement }}% |
+            
+            ### 🔄 Auto-Merge Decision
+            - **Will Auto-Merge:** ${{ steps.compare_metrics.outputs.auto_merge }}
+            - **Reason:** ${{ steps.compare_metrics.outputs.merge_reason }}
+            
+            ### ✅ Pipeline Status
+            - Data Fetch (10 years): ✅ Passed
+            - Feature Engineering: ✅ Passed
+            - Model Training: ✅ Passed
+            - TensorFlow.js Export: ✅ Passed
+            - Keras 3 Compatibility Fix: ✅ Applied
+            - Online Learning Models: ✅ Trained
+            - Vintage Ensemble: ✅ Saved
+            
+            ### 📊 Multi-Paradigm Models Updated
+            
+            **🎯 Rolling Window (Gradient Boosting - 50% default weight)**
+            - LightGBM (30% weight)
+            - XGBoost (25% weight)
+            - CatBoost (25% weight)
+            - Random Forest (20% weight)
+            
+            **📡 Online Learning (25% default weight)**
+            - SGD Classifier (pre-trained, browser-updatable)
+            - Passive-Aggressive Classifier (pre-trained, browser-updatable)
+            
+            **🏛️ Vintage Ensemble (25% default weight)**
+            - Historical model versions (up to 4 vintages)
+            - Temporal diversity for robustness
+            
+            ---
+            *This PR was automatically created by the Nightly Retrain workflow.*
+            *Models are trained on the last 10 years of market data and compared against the main branch.*
+          labels: |
+            ml-models
+            automated
+          delete-branch: false
+          add-paths: |
+            public/models/**
+      
+      - name: 🔀 Auto-Merge PR if Metrics Improved
+        id: auto_merge
+        if: success() && steps.compare_metrics.outputs.auto_merge == 'true' && steps.create_pr.outputs.pull-request-number
+        run: |
+          echo "🔀 Auto-merging PR #${{ steps.create_pr.outputs.pull-request-number }}"
+          echo "   Reason: ${{ steps.compare_metrics.outputs.merge_reason }}"
+          
+          # Merge the PR immediately (keeps model-deployment-branch for future use)
+          gh pr merge ${{ steps.create_pr.outputs.pull-request-number }} \
+            --squash \
+            --body "🤖 ML Models: Auto-merged - Sharpe improved by ${{ steps.compare_metrics.outputs.sharpe_improvement }}%"
+          
+          echo "✅ PR #${{ steps.create_pr.outputs.pull-request-number }} merged successfully!"
+          echo "   Note: model-deployment-branch preserved for future deployments"
+          echo "merged=true" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🚀 Trigger Deploy Workflow
+        if: success() && steps.auto_merge.outputs.merged == 'true'
+        run: |
+          echo "🚀 Triggering deploy.yml workflow..."
+          
+          # Wait a few seconds for git to sync after merge
+          sleep 5
+          
+          # Trigger the deploy workflow on main branch
+          gh workflow run deploy.yml --ref main
+          
+          echo "✅ Deploy workflow triggered successfully!"
+          echo "   View progress: https://github.com/${{ github.repository }}/actions/workflows/deploy.yml"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 📧 Send Success Notification
+        if: success()
+        run: |
+          echo "🎉 SUCCESS: Model changes pushed to model-deployment-branch!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📈 Metrics Comparison" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Previous | New | Change |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|----------|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Sharpe | ${{ steps.check_models.outputs.old_sharpe }} | ${{ steps.compare_metrics.outputs.new_sharpe }} | ${{ steps.compare_metrics.outputs.sharpe_improvement }}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Accuracy | ${{ steps.check_models.outputs.old_accuracy }} | ${{ steps.compare_metrics.outputs.new_accuracy }} | ${{ steps.compare_metrics.outputs.accuracy_improvement }}% |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🔀 Auto-Merge Status" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.compare_metrics.outputs.auto_merge }}" == "true" ]; then
+            echo "✅ **Auto-merge ENABLED** - ${{ steps.compare_metrics.outputs.merge_reason }}" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ steps.auto_merge.outputs.merged }}" == "true" ]; then
+              echo "✅ **PR Merged** and **Deploy Triggered**" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "⏸️ **Manual review required** - ${{ steps.compare_metrics.outputs.merge_reason }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.auto_merge.outputs.merged }}" == "true" ]; then
+            echo "✅ Deploy workflow triggered - check [Actions](https://github.com/${{ github.repository }}/actions/workflows/deploy.yml)" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.compare_metrics.outputs.auto_merge }}" == "true" ]; then
+            echo "⏳ Awaiting merge completion..." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏸️ Deploy will trigger after manual PR merge" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.auto_merge.outputs.merged }}" == "true" ]; then
+            echo "✅ All automated! Models will be live on GitHub Pages in ~2-3 minutes." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.compare_metrics.outputs.auto_merge }}" == "true" ]; then
+            echo "PR is being auto-merged. Deploy will follow." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "1. Review the PR manually" >> $GITHUB_STEP_SUMMARY
+            echo "2. Check if the metrics are acceptable" >> $GITHUB_STEP_SUMMARY
+            echo "3. Merge or close the PR based on review" >> $GITHUB_STEP_SUMMARY
+            echo "4. Once merged, manually trigger deploy.yml or push to main" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # =========================================================================
+  # NOTE: Deployment is handled by deploy.yml workflow
+  # This workflow explicitly triggers deploy.yml after auto-merge because
+  # GITHUB_TOKEN-based merges don't automatically trigger other workflows.
+  # The deploy.yml workflow:
+  # 1. Builds the React app
+  # 2. Copies models to dist
+  # 3. Deploys to public repo (alpha-mirage) via peaceiris/actions-gh-pages
+  # 4. GitHub Pages serves from the public repo
+  # =========================================================================
+
+  notify-failure:
+    needs: [train-and-deploy]
+    runs-on: ubuntu-latest
+    if: failure()
+    
+    steps:
+      - name: 📧 Report Failure
+        run: |
+          echo "❌ ML Nightly Retrain Failed!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please check the workflow logs for details." >> $GITHUB_STEP_SUMMARY

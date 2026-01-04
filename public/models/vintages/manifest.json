@@ -1,0 +1,151 @@
+{
+  "version": "20260104",
+  "timestamp": "2026-01-04T17:21:45.573208",
+  "maxVintages": 4,
+  "vintages": [
+    {
+      "version": "202601041721",
+      "trainedAt": "2026-01-04T17:21:45.573191",
+      "modelName": "randomforest",
+      "path": "vintages/randomforest/202601041721",
+      "metrics": {
+        "sharpeRatio": 0.16428720125047905,
+        "accuracy": 0.5145066018068103,
+        "winRate": 0.5156324946583526,
+        "maxDrawdown": -0.9999955554774203
+      }
+    },
+    {
+      "version": "202601041721",
+      "trainedAt": "2026-01-04T17:21:45.566726",
+      "modelName": "catboost",
+      "path": "vintages/catboost/202601041721",
+      "metrics": {
+        "sharpeRatio": 0.14086378373701505,
+        "accuracy": 0.5232366226546212,
+        "winRate": 0.5250512362098286,
+        "maxDrawdown": -0.9999992501815288
+      }
+    },
+    {
+      "version": "202601041721",
+      "trainedAt": "2026-01-04T17:21:45.560978",
+      "modelName": "xgboost",
+      "path": "vintages/xgboost/202601041721",
+      "metrics": {
+        "sharpeRatio": 0.18679536914276337,
+        "accuracy": 0.515722724113968,
+        "winRate": 0.5163737845026817,
+        "maxDrawdown": -0.9998421036844669
+      }
+    },
+    {
+      "version": "202601041721",
+      "trainedAt": "2026-01-04T17:21:45.558677",
+      "modelName": "lightgbm",
+      "path": "vintages/lightgbm/202601041721",
+      "metrics": {
+        "sharpeRatio": 0.14707187705148034,
+        "accuracy": 0.5212821403752605,
+        "winRate": 0.5228709719618018,
+        "maxDrawdown": -0.9999951381504503
+      }
+    },
+    {
+      "version": "202601041710",
+      "trainedAt": "2026-01-04T17:10:25.458858",
+      "modelName": "randomforest",
+      "path": "vintages/randomforest/202601041710",
+      "metrics": {
+        "sharpeRatio": 0.23937460812334838,
+        "accuracy": 0.5162004864489229,
+        "winRate": 0.5171586796319714,
+        "maxDrawdown": -0.9999930269741912
+      }
+    },
+    {
+      "version": "202601041710",
+      "trainedAt": "2026-01-04T17:10:25.442818",
+      "modelName": "catboost",
+      "path": "vintages/catboost/202601041710",
+      "metrics": {
+        "sharpeRatio": 0.14085875959553718,
+        "accuracy": 0.5232366226546212,
+        "winRate": 0.5250512362098286,
+        "maxDrawdown": -0.9999992501842604
+      }
+    },
+    {
+      "version": "202601041710",
+      "trainedAt": "2026-01-04T17:10:25.433087",
+      "modelName": "xgboost",
+      "path": "vintages/xgboost/202601041710",
+      "metrics": {
+        "sharpeRatio": 0.13047659409529405,
+        "accuracy": 0.5089471855455178,
+        "winRate": 0.5099202023285222,
+        "maxDrawdown": -0.9995642896332018
+      }
+    },
+    {
+      "version": "202601041710",
+      "trainedAt": "2026-01-04T17:10:25.424763",
+      "modelName": "lightgbm",
+      "path": "vintages/lightgbm/202601041710",
+      "metrics": {
+        "sharpeRatio": 0.3020459960239847,
+        "accuracy": 0.5202831827658095,
+        "winRate": 0.5215628134129856,
+        "maxDrawdown": -0.9976181950487927
+      }
+    },
+    {
+      "version": "202601041649",
+      "trainedAt": "2026-01-04T16:49:47.422996",
+      "modelName": "randomforest",
+      "path": "vintages/randomforest/202601041649",
+      "metrics": {
+        "sharpeRatio": 0.28432277123660854,
+        "accuracy": 0.516461084086171,
+        "winRate": 0.5174639166266951,
+        "maxDrawdown": -0.9999949169839569
+      }
+    },
+    {
+      "version": "202601041649",
+      "trainedAt": "2026-01-04T16:49:47.411604",
+      "modelName": "catboost",
+      "path": "vintages/catboost/202601041649",
+      "metrics": {
+        "sharpeRatio": 0.21966174654130133,
+        "accuracy": 0.5264072272411396,
+        "winRate": 0.5283652378668294,
+        "maxDrawdown": -0.9999990856683342
+      }
+    },
+    {
+      "version": "202601041649",
+      "trainedAt": "2026-01-04T16:49:47.378311",
+      "modelName": "xgboost",
+      "path": "vintages/xgboost/202601041649",
+      "metrics": {
+        "sharpeRatio": 0.2155645776222469,
+        "accuracy": 0.5134207783182766,
+        "winRate": 0.5139754938298522,
+        "maxDrawdown": -0.9979285014667595
+      }
+    },
+    {
+      "version": "202601041649",
+      "trainedAt": "2026-01-04T16:49:47.370594",
+      "modelName": "lightgbm",
+      "path": "vintages/lightgbm/202601041649",
+      "metrics": {
+        "sharpeRatio": 0.2349214467454026,
+        "accuracy": 0.5238446838082002,
+        "winRate": 0.5250948414947891,
+        "maxDrawdown": -0.9998551929413524
+      }
+    }
+  ]
+}
