@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TFJS Model Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+</head>
+<body>
+    <h1>TensorFlow.js Model Loading Test</h1>
+    <pre id="log"></pre>
+    <script>
+        const log = (msg) => {
+            console.log(msg);
+            document.getElementById('log').textContent += msg + '\n';
+        };
+        
+        async function testModelLoading() {
+            log('Starting model loading test...');
+            log('TensorFlow.js version: ' + tf.version.tfjs);
+            
+            try {
+                // Test manifest load
+                const manifestUrl = '/alpha-mirage/models/manifest.json';
+                log('Loading manifest from: ' + manifestUrl);
+                
+                const manifestRes = await fetch(manifestUrl);
+                if (!manifestRes.ok) {
+                    throw new Error('Manifest fetch failed: ' + manifestRes.status);
+                }
+                const manifest = await manifestRes.json();
+                log('✅ Manifest loaded: version ' + manifest.version);
+                
+                // Test model load
+                const modelUrl = '/alpha-mirage/models/lightgbm/model.json';
+                log('Loading model from: ' + modelUrl);
+                
+                const model = await tf.loadLayersModel(modelUrl);
+                log('✅ Model loaded successfully!');
+                log('Model input shape: ' + JSON.stringify(model.inputs[0].shape));
+                log('Model output shape: ' + JSON.stringify(model.outputs[0].shape));
+                
+                // Test prediction
+                const testInput = tf.ones([1, 55]);
+                const prediction = model.predict(testInput);
+                const result = await prediction.data();
+                log('✅ Test prediction result: ' + result[0]);
+                
+            } catch (error) {
+                log('❌ Error: ' + error.message);
+                console.error(error);
+            }
+        }
+        
+        testModelLoading();
+    </script>
+</body>
+</html>

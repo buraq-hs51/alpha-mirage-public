@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-01-09T21:24:18.049529",
+  "models": {
+    "lightgbm": {
+      "sharpe_ratio": -0.4750174018888274,
+      "annual_return": 0.024497574405356826,
+      "max_drawdown": -0.037644091669817394,
+      "win_rate": 0.45255474452554745,
+      "profit_factor": 1.2540404489114332,
+      "total_trades": 630,
+      "total_return": 0.0680003362571
+    },
+    "xgboost": {
+      "sharpe_ratio": 0.8398603693870326,
+      "annual_return": 0.07989737473470937,
+      "max_drawdown": -0.03696018478056896,
+      "win_rate": 0.4992700729927007,
+      "profit_factor": 1.6521180376310747,
+      "total_trades": 622,
+      "total_return": 0.23237271217925914
+    },
+    "catboost": {
+      "sharpe_ratio": -0.08315297512024168,
+      "annual_return": 0.03805270327502819,
+      "max_drawdown": -0.025759679645057033,
+      "win_rate": 0.4926900584795322,
+      "profit_factor": 1.502997362115857,
+      "total_trades": 637,
+      "total_return": 0.10684920799703201
+    },
+    "randomforest": {
+      "sharpe_ratio": -1.2711121737218956,
+      "annual_return": 0.009335962284268806,
+      "max_drawdown": -0.027346214210999455,
+      "win_rate": 0.41124260355029585,
+      "profit_factor": 1.1503386517245457,
+      "total_trades": 615,
+      "total_return": 0.025581518600774622
+    }
+  }
+}
